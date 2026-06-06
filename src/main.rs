@@ -722,6 +722,8 @@ fn run_xload_image(
     go: bool,
     run_for: Duration,
 ) -> Result<()> {
+    ensure_safe_xload_go_target(board, target, go)?;
+
     if !image.is_file() {
         bail!("image does not exist: {}", image.display());
     }
@@ -796,6 +798,32 @@ fn run_xload_image(
     } else {
         bail!("did not see expected output: {}", board.expect);
     }
+}
+
+fn ensure_safe_xload_go_target(board: &BoardProfile, target: &str, go: bool) -> Result<()> {
+    if !go {
+        return Ok(());
+    }
+
+    if target.eq_ignore_ascii_case("auto") {
+        bail!(
+            "refusing xload auto with go: Xiaojin OS is currently statically linked at {}. \
+             Auto can jump to the alternate slot and corrupt runtime formatting/state. \
+             Update the SD image and boot with run-sd until PIC or trampoline reload is implemented.",
+            board.load_addr
+        );
+    }
+
+    let load_addr = parse_hex_or_dec(&board.load_addr)?;
+    let target_addr = parse_hex_or_dec(target)?;
+    if target_addr != load_addr {
+        bail!(
+            "refusing xload go to 0x{target_addr:08x}: this image is statically linked at 0x{load_addr:08x}. \
+             Boot from SD at the link address, or implement PIC/trampoline reload first."
+        );
+    }
+
+    Ok(())
 }
 
 fn send_raw_image(session: &mut SerialSession, data: &[u8]) -> Result<()> {
