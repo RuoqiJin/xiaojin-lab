@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Xiaojin Lab</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>Xiaojin Lab</h1>
+          <p id="subtitle">Host controller for Xiaojin OS boards</p>
+        </div>
+        <div class="top-actions">
+          <button id="refreshBtn" class="icon-button" title="Refresh status">Refresh</button>
+          <span id="statusPill" class="status-pill">Booting UI</span>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="panel board-panel">
+          <div class="panel-head">
+            <h2>Board</h2>
+            <span id="boardId" class="muted">-</span>
+          </div>
+          <dl class="kv-grid">
+            <dt>Name</dt>
+            <dd id="boardName">-</dd>
+            <dt>Serial</dt>
+            <dd id="serialPort">-</dd>
+            <dt>Baud</dt>
+            <dd id="baud">-</dd>
+            <dt>Load</dt>
+            <dd id="loadAddr">-</dd>
+            <dt>MMC</dt>
+            <dd id="mmc">-</dd>
+          </dl>
+          <div class="port-row">
+            <span class="label">Detected ports</span>
+            <div id="detectedPorts" class="chip-row"></div>
+          </div>
+        </section>
+
+        <section class="panel image-panel">
+          <div class="panel-head">
+            <h2>Image</h2>
+            <span id="imageState" class="muted">-</span>
+          </div>
+          <dl class="kv-grid">
+            <dt>Path</dt>
+            <dd id="imagePath" class="path">-</dd>
+            <dt>Size</dt>
+            <dd id="imageSize">-</dd>
+            <dt>SHA256</dt>
+            <dd id="imageHash" class="hash">-</dd>
+          </dl>
+          <div class="button-row">
+            <button id="buildBtn">Build OS</button>
+            <button id="copyBtn">Copy to SD</button>
+          </div>
+          <label class="input-line">
+            <span>SD volume</span>
+            <input id="volumeInput" value="/Volumes/R5COS" />
+          </label>
+          <div id="volumes" class="chip-row"></div>
+        </section>
+
+        <section class="panel action-panel">
+          <div class="panel-head">
+            <h2>Run</h2>
+            <span class="muted">R5C via U-Boot</span>
+          </div>
+          <div class="button-row">
+            <button id="breakBtn">Break U-Boot</button>
+            <button id="runBtn" class="primary">Run from SD</button>
+          </div>
+          <label class="check-line">
+            <input id="noBreakInput" type="checkbox" />
+            <span>Board is already at U-Boot prompt</span>
+          </label>
+          <label class="input-line">
+            <span>Run seconds</span>
+            <input id="runSecondsInput" type="number" min="2" max="60" value="8" />
+          </label>
+          <p class="hint">For a cold boot, click Run from SD, then immediately reset or power-cycle the board.</p>
+        </section>
+
+        <section class="panel output-panel">
+          <div class="panel-head">
+            <h2>Operation Output</h2>
+            <span id="operationState" class="muted">Idle</span>
+          </div>
+          <pre id="operationOutput" class="terminal"></pre>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="panel-head">
+            <h2>Latest Log</h2>
+            <span id="logPath" class="muted">-</span>
+          </div>
+          <pre id="latestLog" class="terminal tall"></pre>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
