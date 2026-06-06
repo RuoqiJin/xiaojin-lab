@@ -49,6 +49,21 @@ cargo run -- xload --image ../xiaojin-os/target/aarch64-unknown-none/release/xia
 The target OS ping-pongs between `0x04080000` and `0x05080000`, so repeated
 serial uploads do not overwrite the currently running loader.
 
+For the normal edit-build-run loop, use:
+
+```bash
+cargo run -- dev
+```
+
+Installed CLI equivalent:
+
+```bash
+xjctl dev
+```
+
+`dev` runs `build-os`, sends the rebuilt image with `xload`, and waits for the
+new `xj> ` prompt.
+
 Probe U-Boot loading capabilities:
 
 ```bash

@@ -133,6 +133,24 @@ enum Commands {
         run_seconds: Option<f32>,
     },
 
+    /// Build Xiaojin OS, upload it through xload, and wait for the shell prompt.
+    Dev {
+        #[arg(long, default_value = DEFAULT_OS_DIR)]
+        os_dir: PathBuf,
+
+        #[arg(long, default_value = DEFAULT_IMAGE_PATH)]
+        image: PathBuf,
+
+        #[arg(long)]
+        addr: Option<String>,
+
+        #[arg(long)]
+        no_go: bool,
+
+        #[arg(long)]
+        run_seconds: Option<f32>,
+    },
+
     /// Inspect saved serial logs.
     Logs {
         #[command(subcommand)]
@@ -277,10 +295,29 @@ fn main() -> Result<()> {
             run_seconds,
         } => {
             let image = resolve_image_path(image);
-            let target = addr
-                .or_else(|| board.xload_addr.clone())
-                .unwrap_or_else(|| DEFAULT_XLOAD_ADDR.to_string());
+            let target = xload_target(&board, addr);
             let mut session = open_session(&board, &log_dir, "xload")?;
+            run_xload_image(
+                &mut session,
+                &board,
+                &image,
+                &target,
+                !no_go,
+                Duration::from_secs_f32(run_seconds.unwrap_or(8.0)),
+            )
+        }
+        Commands::Dev {
+            os_dir,
+            image,
+            addr,
+            no_go,
+            run_seconds,
+        } => {
+            let os_dir = resolve_os_dir(os_dir);
+            build_os(&os_dir)?;
+            let image = resolve_image_path(image);
+            let target = xload_target(&board, addr);
+            let mut session = open_session(&board, &log_dir, "dev")?;
             run_xload_image(
                 &mut session,
                 &board,
@@ -308,6 +345,12 @@ fn main() -> Result<()> {
             image: resolve_image_path(image),
         }),
     }
+}
+
+fn xload_target(board: &BoardProfile, override_addr: Option<String>) -> String {
+    override_addr
+        .or_else(|| board.xload_addr.clone())
+        .unwrap_or_else(|| DEFAULT_XLOAD_ADDR.to_string())
 }
 
 pub(crate) fn read_board(path: &Path) -> Result<BoardProfile> {
