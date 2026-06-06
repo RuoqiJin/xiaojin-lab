@@ -3,6 +3,7 @@ name = "NanoPi R5C / RK3568"
 port = "/dev/cu.usbserial-210"
 baud = 1500000
 load_addr = "0x04080000"
+xload_addr = "auto"
 mmc_dev = 1
 mmc_part = 1
 image_name = "xiaojin-os.bin"

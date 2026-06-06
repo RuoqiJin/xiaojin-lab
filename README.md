@@ -38,6 +38,17 @@ Break into U-Boot and run the image from SD:
 cargo run -- run-sd --arm-after-enter
 ```
 
+Once Xiaojin OS is running from SD, upload and jump to a fresh image through the
+resident serial loader:
+
+```bash
+cargo run -- xload --image ../xiaojin-os/target/aarch64-unknown-none/release/xiaojin-os.bin
+```
+
+`xload` defaults to the board profile's `xload_addr`, which is `auto` for R5C.
+The target OS ping-pongs between `0x04080000` and `0x05080000`, so repeated
+serial uploads do not overwrite the currently running loader.
+
 Probe U-Boot loading capabilities:
 
 ```bash

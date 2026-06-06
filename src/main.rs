@@ -17,6 +17,7 @@ const DEFAULT_BOARD_PATH: &str = "boards/r5c.toml";
 const DEFAULT_LOG_DIR: &str = "logs";
 const DEFAULT_OS_DIR: &str = "../xiaojin-os";
 const DEFAULT_IMAGE_PATH: &str = "../xiaojin-os/target/aarch64-unknown-none/release/xiaojin-os.bin";
+const DEFAULT_XLOAD_ADDR: &str = "auto";
 const EMBEDDED_R5C_BOARD: &str = include_str!("../boards/r5c.toml");
 const SOH: u8 = 0x01;
 const STX: u8 = 0x02;
@@ -117,6 +118,21 @@ enum Commands {
         run_seconds: Option<f32>,
     },
 
+    /// Upload an image through the running Xiaojin OS resident xload receiver.
+    Xload {
+        #[arg(long, default_value = DEFAULT_IMAGE_PATH)]
+        image: PathBuf,
+
+        #[arg(long)]
+        addr: Option<String>,
+
+        #[arg(long)]
+        no_go: bool,
+
+        #[arg(long)]
+        run_seconds: Option<f32>,
+    },
+
     /// Inspect saved serial logs.
     Logs {
         #[command(subcommand)]
@@ -157,6 +173,8 @@ pub(crate) struct BoardProfile {
     pub(crate) mmc_dev: u8,
     pub(crate) mmc_part: u8,
     pub(crate) image_name: String,
+    #[serde(default)]
+    pub(crate) xload_addr: Option<String>,
     pub(crate) break_keys: Vec<String>,
     pub(crate) break_seconds: f32,
     pub(crate) expect: String,
@@ -249,6 +267,26 @@ fn main() -> Result<()> {
                 &mut session,
                 &board,
                 &image,
+                Duration::from_secs_f32(run_seconds.unwrap_or(8.0)),
+            )
+        }
+        Commands::Xload {
+            image,
+            addr,
+            no_go,
+            run_seconds,
+        } => {
+            let image = resolve_image_path(image);
+            let target = addr
+                .or_else(|| board.xload_addr.clone())
+                .unwrap_or_else(|| DEFAULT_XLOAD_ADDR.to_string());
+            let mut session = open_session(&board, &log_dir, "xload")?;
+            run_xload_image(
+                &mut session,
+                &board,
+                &image,
+                &target,
+                !no_go,
                 Duration::from_secs_f32(run_seconds.unwrap_or(8.0)),
             )
         }
@@ -633,6 +671,108 @@ fn run_serial_image(
     }
 }
 
+fn run_xload_image(
+    session: &mut SerialSession,
+    board: &BoardProfile,
+    image: &Path,
+    target: &str,
+    go: bool,
+    run_for: Duration,
+) -> Result<()> {
+    if !image.is_file() {
+        bail!("image does not exist: {}", image.display());
+    }
+
+    let data = fs::read(image).with_context(|| format!("failed to read {}", image.display()))?;
+    let crc = crc32(&data);
+
+    println!("waiting for Xiaojin OS shell prompt on {}...", board.port);
+    drain_serial(
+        session,
+        Duration::from_millis(100),
+        Duration::from_millis(500),
+    )?;
+    write_serial(session, b"\r")?;
+    read_until(session, board.expect.as_bytes(), Duration::from_secs(5)).with_context(|| {
+        format!(
+            "did not see Xiaojin OS prompt {}; boot the SD loader first with `xjctl run-sd --arm-after-enter --interactive`",
+            board.expect
+        )
+    })?;
+
+    let command = format!(
+        "xload {target} {} 0x{crc:08x}{}",
+        data.len(),
+        if go { " go" } else { "" }
+    );
+    log_host_line(
+        session,
+        &format!(
+            "xload image={} bytes={} crc32=0x{crc:08x} target={target} go={go}",
+            image.display(),
+            data.len()
+        ),
+    )?;
+    println!(">> {command}");
+    write_serial(session, command.as_bytes())?;
+    write_serial(session, b"\r")?;
+
+    let (ready_index, ready_output) = read_until_any(
+        session,
+        &[b"XLOAD READY", b"xload refused", b"usage: xload"],
+        Duration::from_secs(8),
+    )?;
+    if ready_index != 0 {
+        bail!("xload receiver did not arm; output: {ready_output:?}");
+    }
+
+    println!(
+        "sending {} bytes to xload receiver (crc32=0x{crc:08x})...",
+        data.len()
+    );
+    send_raw_image(session, &data)?;
+
+    let (status_index, status_output) = read_until_any(
+        session,
+        &[b"XLOAD OK", b"XLOAD ERR"],
+        Duration::from_secs(20),
+    )?;
+    if status_index != 0 {
+        bail!("xload transfer failed; output: {status_output:?}");
+    }
+
+    if status_output.contains(&board.expect) {
+        println!("\nverified expected output: {}", board.expect);
+        return Ok(());
+    }
+
+    let output = read_until(session, board.expect.as_bytes(), run_for)?;
+    if output.contains(&board.expect) {
+        println!("\nverified expected output: {}", board.expect);
+        Ok(())
+    } else {
+        bail!("did not see expected output: {}", board.expect);
+    }
+}
+
+fn send_raw_image(session: &mut SerialSession, data: &[u8]) -> Result<()> {
+    let mut sent = 0usize;
+    let mut next_progress = Instant::now() + Duration::from_millis(500);
+    for chunk in data.chunks(4096) {
+        session.port.write_all(chunk)?;
+        sent += chunk.len();
+        let now = Instant::now();
+        if now >= next_progress || sent == data.len() {
+            print!("\rsent {sent}/{} bytes", data.len());
+            io::stdout().flush()?;
+            next_progress = now + Duration::from_millis(500);
+        }
+    }
+    session.port.flush()?;
+    println!();
+    Ok(())
+}
+
 fn send_uboot_command(session: &mut SerialSession, command: &str) -> Result<String> {
     let output = run_uboot_command(session, command, Duration::from_secs(8))?;
     if output.contains("Unknown command") || output.contains("** Invalid") {
@@ -734,6 +874,33 @@ pub(crate) fn read_until(
         "timed out waiting for serial text {:?}",
         String::from_utf8_lossy(needle)
     ))
+}
+
+fn read_until_any(
+    session: &mut SerialSession,
+    needles: &[&[u8]],
+    timeout: Duration,
+) -> Result<(usize, String)> {
+    let start = Instant::now();
+    let mut collected = Vec::new();
+    while start.elapsed() <= timeout {
+        let chunk = read_once(session)?;
+        if !chunk.is_empty() {
+            collected.extend_from_slice(&chunk);
+            for (index, needle) in needles.iter().enumerate() {
+                if contains_bytes(&collected, needle) {
+                    return Ok((index, String::from_utf8_lossy(&collected).into_owned()));
+                }
+            }
+        }
+    }
+
+    let labels = needles
+        .iter()
+        .map(|needle| String::from_utf8_lossy(needle).into_owned())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(anyhow!("timed out waiting for one of: {labels}"))
 }
 
 fn read_uboot_prompt(session: &mut SerialSession, timeout: Duration) -> Result<String> {
@@ -1002,6 +1169,26 @@ fn crc16_xmodem(bytes: &[u8]) -> u16 {
     crc
 }
 
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in bytes {
+        crc = crc32_update(crc, *byte);
+    }
+    !crc
+}
+
+fn crc32_update(mut crc: u32, byte: u8) -> u32 {
+    crc ^= byte as u32;
+    for _ in 0..8 {
+        if crc & 1 != 0 {
+            crc = (crc >> 1) ^ 0xedb8_8320;
+        } else {
+            crc >>= 1;
+        }
+    }
+    crc
+}
+
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     find_bytes(haystack, needle).is_some()
 }
@@ -1049,6 +1236,11 @@ mod tests {
     #[test]
     fn crc16_xmodem_known_vector() {
         assert_eq!(crc16_xmodem(b"123456789"), 0x31c3);
+    }
+
+    #[test]
+    fn crc32_known_vector() {
+        assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
     }
 
     #[test]
