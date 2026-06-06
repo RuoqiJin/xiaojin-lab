@@ -46,11 +46,10 @@ cargo run -- xload --image ../xiaojin-os/target/aarch64-unknown-none/release/xia
 ```
 
 `xload` defaults to the board profile's `xload_addr`, which is `auto` for R5C.
-This is safe only after the OS image becomes position independent or gains a
-copy-down trampoline. The current Xiaojin OS image is statically linked at
-`0x04080000`, so `xjctl` refuses `auto` with `go` to avoid jumping into the
-alternate slot and corrupting runtime state. For now, update the SD image and
-boot with `run-sd` when the link-address image must be refreshed.
+The current Xiaojin OS image is statically linked at `0x04080000`, so `xjctl`
+first queries `caps` and requires `xload auto-reload yes` before using `auto`
+with `go`. Older kernels that do not report this capability are refused instead
+of being jumped into an unsafe alternate slot.
 
 For the normal edit-build-run loop, use:
 
@@ -58,9 +57,8 @@ For the normal edit-build-run loop, use:
 cargo run -- dev
 ```
 
-This command is temporarily guarded for the R5C static image. The next loader
-milestone is either PIC output or a trampoline reload path, after which `dev`
-can go back to true one-command hot reload.
+This command now relies on the OS copy-down trampoline: upload to the alternate
+slot, copy back to the static link address, then jump into the refreshed image.
 
 Installed CLI equivalent:
 

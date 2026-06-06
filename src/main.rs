@@ -722,8 +722,6 @@ fn run_xload_image(
     go: bool,
     run_for: Duration,
 ) -> Result<()> {
-    ensure_safe_xload_go_target(board, target, go)?;
-
     if !image.is_file() {
         bail!("image does not exist: {}", image.display());
     }
@@ -744,6 +742,7 @@ fn run_xload_image(
             board.expect
         )
     })?;
+    ensure_safe_xload_go_target(session, board, target, go)?;
 
     let command = format!(
         "xload {target} {} 0x{crc:08x}{}",
@@ -800,30 +799,50 @@ fn run_xload_image(
     }
 }
 
-fn ensure_safe_xload_go_target(board: &BoardProfile, target: &str, go: bool) -> Result<()> {
+fn ensure_safe_xload_go_target(
+    session: &mut SerialSession,
+    board: &BoardProfile,
+    target: &str,
+    go: bool,
+) -> Result<()> {
     if !go {
         return Ok(());
     }
 
     if target.eq_ignore_ascii_case("auto") {
+        let caps = query_xiaojin_caps(session, board)?;
+        if caps.contains("xload auto-reload yes") {
+            return Ok(());
+        }
         bail!(
-            "refusing xload auto with go: Xiaojin OS is currently statically linked at {}. \
-             Auto can jump to the alternate slot and corrupt runtime formatting/state. \
-             Update the SD image and boot with run-sd until PIC or trampoline reload is implemented.",
-            board.load_addr
-        );
+            "refusing xload auto with go: running Xiaojin OS did not report `xload auto-reload yes`. \
+             Update the SD image and boot with run-sd before using dev hot reload."
+        )
     }
 
     let load_addr = parse_hex_or_dec(&board.load_addr)?;
     let target_addr = parse_hex_or_dec(target)?;
+    if target_addr == load_addr {
+        bail!(
+            "refusing direct xload go to the static link address 0x{load_addr:08x}: \
+             receive with `auto` so the OS can copy down through its reload trampoline."
+        );
+    }
+
     if target_addr != load_addr {
         bail!(
             "refusing xload go to 0x{target_addr:08x}: this image is statically linked at 0x{load_addr:08x}. \
-             Boot from SD at the link address, or implement PIC/trampoline reload first."
+             Use `auto` with a Xiaojin OS that reports `xload auto-reload yes`."
         );
     }
 
     Ok(())
+}
+
+fn query_xiaojin_caps(session: &mut SerialSession, board: &BoardProfile) -> Result<String> {
+    write_serial(session, b"caps\r")?;
+    read_until(session, board.expect.as_bytes(), Duration::from_secs(3))
+        .context("failed to query Xiaojin OS capabilities")
 }
 
 fn send_raw_image(session: &mut SerialSession, data: &[u8]) -> Result<()> {
